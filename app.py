@@ -27,7 +27,7 @@ def scrape_tokopedia(keywords, limit, min_p, cat_id, min_sold, shop_tier):
     progress_bar = st.progress(0)
     
     for idx, keyword in enumerate(keywords):
-        st.write(f"🔍 Mencari: **{keyword}**...")
+        st.write(f"Mencari: **{keyword}**...")
         
         # Params Construction
         shop_filter = f"&shop_tier={shop_tier}" if shop_tier != "All" else ""
@@ -77,7 +77,7 @@ def scrape_tokopedia(keywords, limit, min_p, cat_id, min_sold, shop_tier):
             
             # Progress Update
             progress_bar.progress((idx + 1) / len(keywords))
-            time.sleep(2) # Delay anti-bot
+            time.sleep(3) # Delay anti-bot
             
         except Exception as e:
             st.error(f"Error pada {keyword}: {e}")
@@ -91,7 +91,7 @@ st.title("MarketSpy: Tokopedia Dashboard Analyzer")
 st.markdown("Dashboard analisis pasar untuk riset produk secara massal atau manual.")
 
 # Sidebar Filters
-st.sidebar.header("⚙️ Konfigurasi Filter")
+st.sidebar.header("Konfigurasi Filter")
 cat_id = st.sidebar.text_input("ID Kategori (HP=25, Makanan=58)", value="25")
 min_price = st.sidebar.number_input("Harga Minimal (Rp)", value=500000, step=50000)
 min_sold = st.sidebar.number_input("Minimal Terjual", value=30, step=5)
@@ -99,7 +99,7 @@ limit_per_key = st.sidebar.slider("Hasil per Kata Kunci", 5, 50, 15)
 shop_tier = st.sidebar.selectbox("Tipe Toko", ["All", "2"]) # 2 = Official Store
 
 # Tabs for Input
-tab1, tab2 = st.tabs(["Massal (CSV)", "⌨️ Manual Input"])
+tab1, tab2 = st.tabs(["Massal (CSV)", "Manual Input"])
 
 keywords_to_search = []
 
@@ -124,7 +124,7 @@ if st.button("Mulai Scraping & Analisis"):
             df_final = scrape_tokopedia(keywords_to_search, limit_per_key, min_price, cat_id, min_sold, shop_tier)
             
             if not df_final.empty:
-                st.subheader("📊 Hasil Analisis")
+                st.subheader("Hasil Analisis")
                 st.dataframe(df_final, use_container_width=True)
                 
                 # Download Button
