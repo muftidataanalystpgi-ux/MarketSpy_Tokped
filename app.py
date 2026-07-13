@@ -4,6 +4,7 @@ import pandas as pd
 import re
 import time
 import io
+import random
 
 # =============================================================================
 # CONFIGURATION & HEADER
@@ -26,6 +27,32 @@ def parse_terjual(text):
     res = re.findall(r"(\d+)", text)
     return int(res[0]) if res else 0
 
+def get_rotated_proxy(proxy_settings):
+    """Mengambil dan memformat proxy berdasarkan opsi yang dipilih di UI."""
+    if not proxy_settings or not proxy_settings.get("use_proxy"):
+        return None
+        
+    if proxy_settings.get("mode") == "Tautan Webshare (Otomatis)":
+        try:
+            proxy_url_list = "https://proxy.webshare.io/api/v2/proxy/list/download/bpfflnzhzjhbevwpoblyubaevtfhmfqtptyjjaux/-/any/username/direct/-/?plan_id=13791542"
+            response_proxy = requests.get(proxy_url_list, timeout=10)
+            if response_proxy.status_code == 200:
+                proxy_lines = response_proxy.text.strip().split('\n')
+                if proxy_lines and proxy_lines[0]:
+                    chosen_proxy = random.choice(proxy_lines).strip()
+                    # Format Webshare: IP:PORT:USER:PASS
+                    ip, port, user, password = chosen_proxy.split(':')
+                    proxy_formatted = f"http://{user}:{password}@{ip}:{port}"
+                    return {"http": proxy_formatted, "https": proxy_formatted}
+        except Exception as e:
+            st.warning(f"⚠️ Gagal mengambil proxy dari Webshare Link: {e}. Berjalan tanpa proxy.")
+            
+    elif proxy_settings.get("mode") == "Input Manual" and proxy_settings.get("address"):
+        proxy_url = f"http://{proxy_settings['user']}:{proxy_settings['pass']}@{proxy_settings['address']}" if proxy_settings['user'] else f"http://{proxy_settings['address']}"
+        return {"http": proxy_url, "https": proxy_url}
+        
+    return None
+
 # =============================================================================
 # ENGINE 1: TOKOPEDIA SCRAPER
 # =============================================================================
@@ -37,11 +64,6 @@ def run_tokopedia_scraper(product_list, max_per_item, pmin, category_id, progres
         "x-source": "search"
     }
     
-    proxies = None
-    if proxy_settings and proxy_settings.get("address"):
-        proxy_url = f"http://{proxy_settings['user']}:{proxy_settings['pass']}@{proxy_settings['address']}" if proxy_settings['user'] else f"http://{proxy_settings['address']}"
-        proxies = {"http": proxy_url, "https": proxy_url}
-
     all_extracted_data = []
     total_items = len(product_list)
 
@@ -78,13 +100,15 @@ def run_tokopedia_scraper(product_list, max_per_item, pmin, category_id, progres
         
         for attempt in range(max_retries):
             try:
-                response = requests.post(url, json=payload, headers=headers, timeout=25, proxies=proxies)
+                # Rotasi proxy aktif setiap kali melakukan percobaan ulang (retry)
+                current_proxy = get_rotated_proxy(proxy_settings)
+                response = requests.post(url, json=payload, headers=headers, timeout=25, proxies=current_proxy)
                 response_data = response.json()[0]['data']['searchProductV5']['data']['products']
                 break 
             except Exception as e:
                 if attempt < max_retries - 1:
-                    status_text.text(f"⚠️ Tokopedia Timeout pada '{search_query}'. Retrying ({attempt + 2}/{max_retries})...")
-                    time.sleep(5)
+                    status_text.text(f"⚠️ Tokopedia Timeout/Blocked pada '{search_query}'. Mencoba proxy lain ({attempt + 2}/{max_retries})...")
+                    time.sleep(4)
                 else:
                     st.warning(f"❌ Gagal memproses Tokopedia '{search_query}' setelah {max_retries} kali percobaan.")
 
@@ -118,7 +142,7 @@ def run_tokopedia_scraper(product_list, max_per_item, pmin, category_id, progres
                 'URL Produk': p['url']
             })
         
-        time.sleep(3)
+        time.sleep(2)
 
     return pd.DataFrame(all_extracted_data)
 
@@ -132,11 +156,6 @@ def run_shopee_scraper(product_list, max_per_item, pmin, progress_bar, status_te
         "Referer": "https://shopee.co.id/",
         "X-Requested-With": "XMLHttpRequest"
     }
-    
-    proxies = None
-    if proxy_settings and proxy_settings.get("address"):
-        proxy_url = f"http://{proxy_settings['user']}:{proxy_settings['pass']}@{proxy_settings['address']}" if proxy_settings['user'] else f"http://{proxy_settings['address']}"
-        proxies = {"http": proxy_url, "https": proxy_url}
 
     all_extracted_data = []
     total_items = len(product_list)
@@ -160,13 +179,14 @@ def run_shopee_scraper(product_list, max_per_item, pmin, progress_bar, status_te
 
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, params=params, headers=headers, timeout=25, proxies=proxies)
+                current_proxy = get_rotated_proxy(proxy_settings)
+                response = requests.get(url, params=params, headers=headers, timeout=25, proxies=current_proxy)
                 items = response.json().get('items', [])
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
-                    status_text.text(f"⚠️ Shopee Timeout pada '{search_query}'. Retrying ({attempt + 2}/{max_retries})...")
-                    time.sleep(5)
+                    status_text.text(f"⚠️ Shopee Timeout/Blocked pada '{search_query}'. Mencoba proxy lain ({attempt + 2}/{max_retries})...")
+                    time.sleep(4)
                 else:
                     st.warning(f"❌ Gagal memproses Shopee '{search_query}' setelah {max_retries} kali percobaan.")
 
@@ -201,7 +221,7 @@ def run_shopee_scraper(product_list, max_per_item, pmin, progress_bar, status_te
                 'URL Produk': f"https://shopee.co.id/product/{item_basic.get('shopid')}/{item_basic.get('itemid')}"
             })
         
-        time.sleep(4)
+        time.sleep(3)
 
     return pd.DataFrame(all_extracted_data)
 
@@ -209,7 +229,7 @@ def run_shopee_scraper(product_list, max_per_item, pmin, progress_bar, status_te
 # FRONTEND CONTROL PANEL
 # =============================================================================
 with st.sidebar:
-    st.header("Target & Parameter")
+    st.header("🎯 Target & Parameter")
     target_marketplace = st.selectbox("Pilih Marketplace Target", ["Tokopedia", "Shopee"])
     max_per_item = st.slider("Max Produk per Item", min_value=1, max_value=50, value=15)
     pmin = st.number_input("Harga Minimal (Rp)", min_value=0, value=300000, step=50000)
@@ -224,11 +244,15 @@ with st.sidebar:
     st.header("🌐 Konfigurasi Proxy Cloud")
     use_proxy = st.checkbox("Aktifkan Jalur Proxy (Rekomendasi Cloud)")
     
-    proxy_settings = {"address": "", "user": "", "pass": ""}
+    proxy_settings = {"use_proxy": use_proxy, "mode": "", "address": "", "user": "", "pass": ""}
     if use_proxy:
-        proxy_settings["address"] = st.text_input("Host:Port Proxy", placeholder="p.webshare.io:80")
-        proxy_settings["user"] = st.text_input("Username Proxy", type="password")
-        proxy_settings["pass"] = st.text_input("Password Proxy", type="password")
+        proxy_mode = st.selectbox("Metode Proxy", ["Tautan Webshare (Otomatis)", "Input Manual"])
+        proxy_settings["mode"] = proxy_mode
+        
+        if proxy_mode == "Input Manual":
+            proxy_settings["address"] = st.text_input("Host:Port Proxy", placeholder="p.webshare.io:80")
+            proxy_settings["user"] = st.text_input("Username Proxy", type="password")
+            proxy_settings["pass"] = st.text_input("Password Proxy", type="password")
 
 # Pilihan Mode Input Data
 input_mode = st.radio("Pilih Metode Pencarian:", ["Input Manual (Satu per Satu)", "Input Massal (Upload File CSV/Excel)"])
@@ -256,7 +280,7 @@ else:
             st.error(f"Gagal membaca file: {e}")
 
 st.write("---")
-start_button = st.button("Mulai Ambil Data & Analisis", type="primary", use_container_width=True)
+start_button = st.button("🚀 Mulai Ambil Data & Analisis", type="primary", use_container_width=True)
 
 # =============================================================================
 # EXECUTION & RESULTS DISPLAY
@@ -272,12 +296,12 @@ if start_button:
             if target_marketplace == "Tokopedia":
                 df_result = run_tokopedia_scraper(
                     product_list, max_per_item, pmin, category_id, 
-                    progress_bar, status_text, proxy_settings=proxy_settings if use_proxy else None
+                    progress_bar, status_text, proxy_settings=proxy_settings
                 )
             elif target_marketplace == "Shopee":
                 df_result = run_shopee_scraper(
                     product_list, max_per_item, pmin, 
-                    progress_bar, status_text, proxy_settings=proxy_settings if use_proxy else None
+                    progress_bar, status_text, proxy_settings=proxy_settings
                 )
         
         progress_bar.empty()
@@ -285,16 +309,16 @@ if start_button:
 
         if not df_result.empty:
             st.success(f"Analisis Selesai! Berhasil merangkum **{len(df_result)}** entitas produk pasar.")
-            st.subheader("Preview Data Hasil Scraping")
+            st.subheader("📊 Preview Data Hasil Scraping")
             st.dataframe(df_result, use_container_width=True)
 
-            st.write("### ⬇Typed Download Database")
+            st.write("### ⬇️ Download Database")
             col_dl1, col_dl2 = st.columns(2)
             
             # Export CSV
             csv_buffer = df_result.to_csv(index=False).encode('utf-8')
             col_dl1.download_button(
-                label="Unduh File CSV", data=csv_buffer,
+                label="📁 Unduh File CSV", data=csv_buffer,
                 file_name=f"hasil_scraping_{target_marketplace.lower()}.csv",
                 mime="text/csv", use_container_width=True
             )
@@ -305,7 +329,7 @@ if start_button:
                 df_result.to_excel(writer, index=False, sheet_name='Data Pasar')
             
             col_dl2.download_button(
-                label="Unduh File Excel (XLSX)", data=excel_buffer.getvalue(),
+                label="📄 Unduh File Excel (XLSX)", data=excel_buffer.getvalue(),
                 file_name=f"hasil_scraping_{target_marketplace.lower()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
